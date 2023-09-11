@@ -1,0 +1,81 @@
+extend = [{ path = "./cargo-make/main.toml" }]
+
+[env]
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+CARGO_MAKE_CARGO_BUILD_TEST_FLAGS = ""
+CARGO_MAKE_WORKSPACE_EMULATION = true
+
+[tasks.gen-members]
+workspace = false
+description = "Generate the list of workspace members"
+script = '''
+examples=$(ls | 
+grep -v README.md | 
+grep -v Makefile.toml | 
+grep -v cargo-make | 
+grep -v gtk | 
+jq -R -s -c 'split("\n")[:-1]')
+echo "CARGO_MAKE_CRATE_WORKSPACE_MEMBERS = $examples"
+'''
+
+[tasks.test-runner-report]
+workspace = false
+description = "report ci test runners for each example - OPTION: [all]"
+script = '''
+BOLD="\e[1m"
+GREEN="\e[0;32m"
+ITALIC="\e[3m"
+YELLOW="\e[0;33m"
+RESET="\e[0m"
+
+echo
+echo "${YELLOW}Test Runner Report${RESET}"
+echo "${ITALIC}Pass the option \"all\" to show all the examples${RESET}"
+echo
+
+makefile_paths=$(find . -name Makefile.toml -not -path '*/target/*' |
+  sed 's%./%%' |
+  sed 's%/Makefile.toml%%' |
+  grep -v Makefile.toml |
+  sort -u)
+
+start_path=$(pwd)
+
+for path in $makefile_paths; do
+  cd $path
+
+  test_runner=
+
+  test_count=$(grep -rl -E "#\[(test|rstest)\]" | wc -l)
+  if [ $test_count -gt 0 ]; then
+    test_runner="-C"
+  fi
+
+  while read -r line; do
+    case $line in
+      *"wasm-test.toml"*)
+          test_runner=$test_runner"-W"
+        ;;
+      *"playwright-test.toml"*)
+          test_runner=$test_runner"-P"
+        ;;
+      *"cargo-leptos-test.toml"*)
+          test_runner=$test_runner"-L"
+        ;;
+    esac
+  done <"./Makefile.toml"
+
+  if [ ! -z "$1" ]; then
+    # Show all examples
+    echo "$path ${BOLD}${test_runner}${RESET}"
+  elif [ ! -z $test_runner ]; then
+    # Filter out examples that do not run tests in `ci`
+    echo "$path ${BOLD}${test_runner}${RESET}"
+  fi
+
+  cd ${start_path}
+done
+echo
+echo "${ITALIC}Runners: C = Cargo Test, L = Cargo Leptos Test, P = Playwright Test, W = WASM Test${RESET}"
+echo
+'''
